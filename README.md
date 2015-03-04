@@ -1,4 +1,4 @@
-# Window Java VM
+# Windows Java VM
 
 This project can be used to created a Windows virtual machine
 pre-loaded\* with Java, Git, 7-Zip, the Heroku toolbelt and some other
