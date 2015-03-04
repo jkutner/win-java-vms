@@ -1,0 +1,7 @@
+#!/bin/bash
+
+ieVersion="9"
+
+curl -s https://raw.githubusercontent.com/xdissent/ievms/master/ievms.sh | env IEVMS_VERSIONS="${ieVersion}" bash
+
+windows-provision "IE${ieVersion} - Win7"

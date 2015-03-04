@@ -1,0 +1,278 @@
+#!/bin/bash
+
+# Caution is a virtue.
+set -o nounset
+set -o errtrace
+set -o errexit
+set -o pipefail
+
+# ## Global Variables
+
+# Options passed to each `curl` command.
+curl_opts=${CURL_OPTS:-""}
+
+# Timeout interval to wait between checks for various states.
+sleep_wait="5"
+
+# The VM user to use for guest control.
+guest_user="IEUser"
+
+# The VM user password to use for guest control.
+guest_pass="Passw0rd!"
+
+ievms_home="${HOME}/.ievms"
+
+win_home_win="C:\\Users\\${guest_user}"
+
+win_home_nix="/Users/${guest_user}"
+
+# Print a message to the console.
+log()  { printf "$*\n" ; return $? ; }
+
+# Print an error message to the console and bail out of the script.
+fail() { log "\nERROR: $*\n" ; exit 1 ; }
+
+check_md5() {
+  local md5
+
+  case $kernel in
+    Darwin) md5=`md5 "${1}" | rev | cut -c-32 | rev` ;;
+    Linux) md5=`md5sum "${1}" | cut -c-32` ;;
+  esac
+
+  if [ "${md5}" != "${2}" ]
+    then
+    log "MD5 check failed for ${1} (wanted ${2}, got ${md5})"
+    return 1
+  fi
+
+  log "MD5 check succeeded for ${1}"
+}
+
+# Download a URL to a local file. Accepts a name, URL and file.
+download() { # name url path md5
+  local attempt=${5:-"0"}
+  local max=${6:-"3"}
+
+  let attempt+=1
+
+  if [[ -f "${3}" ]]
+    then
+    log "Found ${1} at ${3} - skipping download"
+    check_md5 "${3}" "${4}" && return 0
+    log "Check failed - redownloading ${1}"
+    rm -f "${3}"
+  fi
+
+  log "Downloading ${1} from ${2} to ${3} (attempt ${attempt} of ${max})"
+  curl ${curl_opts} -L "${2}" -o "${3}" || fail "Failed to download ${2} to ${ievms_home}/${3} using 'curl', error code ($?)"
+  check_md5 "${3}" "${4}" && return 0
+
+  if [ "${attempt}" == "${max}" ]
+    then
+    echo "Failed to download ${2} to ${ievms_home}/${3} (attempt ${attempt} of ${max})"
+    return 1
+  fi
+
+  log "Redownloading ${1}"
+  download "${1}" "${2}" "${3}" "${4}" "${attempt}" "${max}"
+}
+
+# Check for a supported host system (Linux/OS X).
+check_system() {
+  kernel=`uname -s`
+  case $kernel in
+    Darwin|Linux) ;;
+    *) fail "Sorry, $kernel is not supported." ;;
+  esac
+}
+
+# Ensure VirtualBox is installed and `VBoxManage` is on the `PATH`.
+check_virtualbox() {
+  log "Checking for VirtualBox"
+  hash VBoxManage 2>&- || fail "VirtualBox command line utilities are not installed, please (re)install! (http://virtualbox.org)"
+}
+
+# Determine the VirtualBox version details, querying the download page to ensure
+# validity.
+check_version() {
+  local version=`VBoxManage -v`
+  major_minor_release="${version%%[-_r]*}"
+  local major_minor="${version%.*}"
+  local dl_page=`curl ${curl_opts} -L "http://download.virtualbox.org/virtualbox/" 2>/dev/null`
+
+  if [[ "$version" == *"kernel module is not loaded"* ]]; then
+    fail "$version"
+  fi
+
+  for (( release="${major_minor_release#*.*.}"; release >= 0; release-- ))
+  do
+    major_minor_release="${major_minor}.${release}"
+    if echo $dl_page | grep "${major_minor_release}/" &>/dev/null
+      then
+      log "Virtualbox version ${major_minor_release} found."
+      break
+    else
+      log "Virtualbox version ${major_minor_release} not found, skipping."
+    fi
+  done
+}
+
+# Pause execution until the virtual machine with a given name shuts down.
+wait_for_shutdown() {
+  while true ; do
+    log "Waiting for ${1} to shutdown..."
+    sleep "${sleep_wait}"
+    VBoxManage showvminfo "${1}" | grep "State:" | grep -q "powered off" && return 0 || true
+  done
+}
+
+# Pause execution until guest control is available for a virtual machine.
+wait_for_guestcontrol() {
+  while true ; do
+    log "Waiting for ${1} to be available for guestcontrol..."
+    sleep "${sleep_wait}"
+    VBoxManage showvminfo "${1}" | grep 'Additions run level:' | grep -q "3" && return 0 || true
+  done
+}
+
+# Start a virtual machine in headless mode.
+start_vm() {
+  log "Starting VM ${1}"
+  VBoxManage startvm "${1}"
+}
+
+# Copy a file to the virtual machine. An optional password will be used
+# if given.
+copy_to_vm() {
+  log "Copying ${2} to ${3}"
+  VBoxManage guestcontrol "${1}" cp "${ievms_home}/${2}" "${3}" \
+  --username "${guest_user}" --password "${guest_pass}"
+}
+
+# Execute a command with arguments on a virtual machine.
+guest_control_exec() {
+  local vm="${1}"
+  local image="${2}"
+  shift; shift
+  VBoxManage guestcontrol "${vm}" exec --image "${image}" \
+  --username "${guest_user}" --password "${guest_pass}" \
+  --wait-exit -- "$@"
+}
+
+install_zip() {
+  local file="7z920.exe"
+  local batch="7zip-setup.bat"
+  local src="http://downloads.sourceforge.net/sevenzip/${file}"
+  local dest="/Users/${guest_user}/Desktop"
+  local winDest="C:\\Users\\${guest_user}\\Desktop"
+
+  download "7-Zip" "${src}" "${ievms_home}/${file}" "b3fdf6e7b0aecd48ca7e4921773fb606"
+  copy_to_vm "${1}" "${file}" "${dest}/${file}"
+
+  read -p "Now go manually install 7-zip because Windows (press any key to continue)"
+
+  cat <<EOF > ${ievms_home}/${batch}
+set Path=%path%;C:\Program Files\7-Zip&
+ setx path "%path%"
+EOF
+  copy_to_vm "${1}" "${batch}" "/Users/${guest_user}/${batch}"
+  guest_control_exec "${1}" "C:\\Users\\${guest_user}\\${batch}"
+}
+
+install_jdk() {
+  local file="openjdk7.zip"
+  local batch="jdk-setup.bat"
+  local src="https://bitbucket.org/alexkasko/openjdk-unofficial-builds/downloads/openjdk-1.7.0-u60-unofficial-windows-i586-image.zip"
+  local dest="/Users/${guest_user}"
+  local winDest="C:\\Users\\${guest_user}"
+  local unzipDir="${winDest}\\openjdk-1.7.0-u60-unofficial-windows-i586-image"
+
+  cat <<EOF > ${ievms_home}/${batch}
+rmdir /S /Q ${unzipDir}&
+ 7z x -o${winDest} ${winDest}\\${file}&
+ setx path "%path%;${unzipDir}\\bin"&
+ setx java_home "%path%;${unzipDir}"
+EOF
+
+  download "OpenJDK 7" "${src}" "${ievms_home}/${file}" "67583d822f24f21dc6cc608dc83e808a"
+
+  copy_to_vm "${1}" "${file}" "${dest}/${file}"
+  copy_to_vm "${1}" "${batch}" "${dest}/${batch}"
+
+  guest_control_exec "${1}" "C:\\Users\\${guest_user}\\${batch}"
+}
+
+install_maven() {
+  local file="maven.zip"
+  local batch="maven-setup.bat"
+  local src="http://www.eng.lsu.edu/mirrors/apache/maven/maven-3/3.2.3/binaries/apache-maven-3.2.3-bin.zip"
+  local dest="/Users/${guest_user}"
+  local winDest="C:\\Users\\${guest_user}"
+  local unzipDir="${winDest}\\apache-maven-3.2.3"
+
+  cat <<EOF > ${ievms_home}/${batch}
+rmdir /S /Q ${unzipDir}&
+ 7z x -o${winDest} ${winDest}\\${file}&
+ setx path "%path%;${unzipDir}\\bin"
+EOF
+
+  download "Apache Maven" "${src}" "${ievms_home}/${file}" "463d02b4a31ab2862c295e67e46dee1e"
+
+  copy_to_vm "${1}" "${file}" "${dest}/${file}"
+  copy_to_vm "${1}" "${batch}" "${dest}/${batch}"
+
+  guest_control_exec "${1}" "C:\\Users\\${guest_user}\\${batch}"
+}
+
+install_git() {
+  local file="Git-1.9.4-preview20140929.exe"
+  local batch="git-setup.bat"
+  local src="https://github.com/msysgit/msysgit/releases/download/Git-1.9.4-preview20140929/${file}"
+  local dest="${win_home_nix}/Desktop"
+
+  download "Git" "${src}" "${ievms_home}/${file}" "7a50b65944eed9d8109da9d86a5107e1"
+
+  copy_to_vm "${1}" "${file}" "${dest}/${file}"
+
+  read -p "Now go manually install Git because Windows (press any key to continue)"
+
+  cat <<EOF > ${ievms_home}/${batch}
+set Path=%path%;C:\Program Files\Git\cmd&
+ setx path "%path%"
+EOF
+  copy_to_vm "${1}" "${batch}" "${win_home_nix}/${batch}"
+  guest_control_exec "${1}" "${win_home_win}\\${batch}"
+}
+
+install_heroku() {
+  local file="heroku-toolbelt.exe"
+  local src="https://s3.amazonaws.com/assets.heroku.com/heroku-toolbelt/${file}"
+  local dest="${win_home_nix}/Desktop"
+
+  download "Heroku Toolbelt" "${src}" "${ievms_home}/${file}" "d4721f525acad2a7ffcd6dff98b33e18"
+
+  copy_to_vm "${1}" "${file}" "${dest}/${file}"
+
+  read -p "Now go manually install Heroku Toolbelt because Windows (press any key to continue)"
+}
+
+provision() {
+  local vm=${1}
+  start_vm "${vm}"
+  wait_for_guestcontrol "${vm}"
+
+  install_zip "${vm}"
+  install_jdk "${vm}"
+  install_maven "${vm}"
+  install_git "${vm}"
+  install_heroku "${vm}"
+
+  log "done"
+
+  # guest_control_exec "${vm}" "cmd.exe" /c "shutdown.exe /s /t 0"
+  # wait_for_shutdown "${vm}"
+}
+
+check_system
+provision "${1:-"IE9 - Win7"}"

@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Caution is a virtue.
+set -o nounset
+set -o errtrace
+set -o errexit
+set -o pipefail
+
+# ## Global Variables
+
+# Timeout interval to wait between checks for various states.
+sleep_wait="5"
+
+# The VM user to use for guest control.
+guest_user="IEUser"
+
+# The VM user password to use for guest control.
+guest_pass="Passw0rd!"
+
+# Print a message to the console.
+log()  { printf "$*\n" ; return $? ; }
+
+# Pause execution until the virtual machine with a given name shuts down.
+wait_for_shutdown() {
+  while true ; do
+    log "Waiting for ${1} to shutdown..."
+    sleep "${sleep_wait}"
+    VBoxManage showvminfo "${1}" | grep "State:" | grep -q "powered off" && return 0 || true
+  done
+}
+
+# Execute a command with arguments on a virtual machine.
+guest_control_exec() {
+  local vm="${1}"
+  local image="${2}"
+  shift; shift
+  VBoxManage guestcontrol "${vm}" exec --image "${image}" \
+    --username "${guest_user}" --password "${guest_pass}" \
+    --wait-exit -- "$@"
+}
+
+vm=${1:-"IE9 - Win7"}
+guest_control_exec "${vm}" "cmd.exe" /c "shutdown.exe /s /t 0"
+wait_for_shutdown "${vm}"
