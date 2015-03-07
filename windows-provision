@@ -206,10 +206,10 @@ EOF
 install_maven() {
   local file="maven.zip"
   local batch="maven-setup.bat"
-  local src="http://www.eng.lsu.edu/mirrors/apache/maven/maven-3/3.2.3/binaries/apache-maven-3.2.3-bin.zip"
+  local src="http://apache.org/dist/maven/maven-3/3.2.5/binaries/apache-maven-3.2.5-bin.zip"
   local dest="/Users/${guest_user}"
   local winDest="C:\\Users\\${guest_user}"
-  local unzipDir="${winDest}\\apache-maven-3.2.3"
+  local unzipDir="${winDest}\\apache-maven-3.2.5"
 
   cat <<EOF > ${ievms_home}/${batch}
 rmdir /S /Q ${unzipDir}&
@@ -226,9 +226,9 @@ EOF
 }
 
 install_git() {
-  local file="Git-1.9.4-preview20140929.exe"
+  local file="Git-1.9.5-preview20141217.exe"
   local batch="git-setup.bat"
-  local src="https://github.com/msysgit/msysgit/releases/download/Git-1.9.4-preview20140929/${file}"
+  local src="https://github.com/msysgit/msysgit/releases/download/Git-1.9.5-preview20141217.exe/${file}"
   local dest="${win_home_nix}/Desktop"
 
   download "Git" "${src}" "${ievms_home}/${file}" "7a50b65944eed9d8109da9d86a5107e1"
