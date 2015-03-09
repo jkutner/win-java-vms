@@ -217,7 +217,7 @@ rmdir /S /Q ${unzipDir}&
  setx path "%path%;${unzipDir}\\bin"
 EOF
 
-  download "Apache Maven" "${src}" "${ievms_home}/${file}" "463d02b4a31ab2862c295e67e46dee1e"
+  download "Apache Maven" "${src}" "${ievms_home}/${file}" "e617600b75dff1f69b67e92d55f47c6a"
 
   copy_to_vm "${1}" "${file}" "${dest}/${file}"
   copy_to_vm "${1}" "${batch}" "${dest}/${batch}"
@@ -250,7 +250,7 @@ install_heroku() {
   local src="https://s3.amazonaws.com/assets.heroku.com/heroku-toolbelt/${file}"
   local dest="${win_home_nix}/Desktop"
 
-  download "Heroku Toolbelt" "${src}" "${ievms_home}/${file}" "d4721f525acad2a7ffcd6dff98b33e18"
+  download "Heroku Toolbelt" "${src}" "${ievms_home}/${file}" "28330b03630b437184c00fdb7d524757"
 
   copy_to_vm "${1}" "${file}" "${dest}/${file}"
 
@@ -265,7 +265,10 @@ provision() {
   install_zip "${vm}"
   install_jdk "${vm}"
   install_maven "${vm}"
-  install_git "${vm}"
+
+  # The Heroku Toolbelt already installs this, so we don't have to
+  #install_git "${vm}"
+
   install_heroku "${vm}"
 
   log "done"
